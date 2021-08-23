@@ -1,0 +1,82 @@
+#!/home/ubuntu/anaconda3/envs/thermo/deepmd-kit-2.0b3-gpu/bin/python
+"""
+---------------------------------------------------------------------
+Calculate heat flux given a trajectory
+
+Developer: Ripeng Luo
+---------------------------------------------------------------------
+"""
+
+import os
+os.environ["MKL_NUM_THREADS"] = '4'
+os.environ["NUMEXPR_NUM_THREADS"] = '4'
+os.environ["OMP_NUM_THREADS"] = '4'
+import numpy as np
+import sys
+from deepmd.infer import DeepPot as DP
+
+m_per_s_2_A_per_fs = 0.00001
+E2kCal = 23.061
+
+def read(ifile):
+    data = []
+    idata = []
+    icount = -1
+    a_type = []
+    for line in ifile:
+        words = line.split()
+        if len(words) == 1 and icount < 0:
+            Natom = float(words[0])
+        elif 'CELL' in line:
+            icount += 1
+            if len(idata) == Natom:
+                data.append(idata)
+                idata = []
+            if icount < 1:
+                CELL = np.diag(np.array(list(map(float, words[2:5]))))
+        elif len(words) == 4:
+            idata.append(list(map(float, [words[i] for i in range(1, 4)])))
+            if icount < 1:
+                if words[0] == 'O' or words[0] == 'OW':
+                    a_type.append(0)
+                elif words[0] == 'H' or words[0] == 'HW1' or words[0] == 'HW2':
+                    a_type.append(1)
+  
+    return np.array(data), CELL, np.array(a_type)
+
+def dp_eval(dp, pos):
+    '''
+    evaluates atomic energy and atomic virial in kCalories
+    '''
+    e, f, v, ae, av = dp.eval(pos, box, atype, atomic = True)
+    #print(v[0].reshape([3,3])[0, 2])
+    return ae[0] * E2kCal, av[0].reshape([N_atoms, 3,3]) * E2kCal
+
+if __name__ == '__main__':
+    dpname = sys.argv[1]
+
+    xfile = open('simulation.x_centroid.xyz', 'r')
+    vfile = open('simulation.v_centroid.xyz', 'r')
+
+    positions, box, atype = read(xfile)  ## unit is angstrom
+    velocities = read(vfile)[0] * m_per_s_2_A_per_fs  ## unit is angstrom/fs
+
+    n_frames, N_atoms = positions.shape[0:2]
+
+    J_array = np.empty((n_frames, 3))
+
+    dp = DP(dpname)
+
+    for i_frame in range(n_frames):
+        vel = velocities[i_frame]
+        i_ae, i_av = dp_eval(dp, positions[i_frame])
+        J_convect = np.dot(i_ae.T, vel)
+        
+        print(vel)
+        
+        J_conduct = np.dot(vel.reshape(1, -1), i_av.reshape(-1, 3))
+        J_total = J_convect + J_conduct
+        J_total = J_total.reshape(3)
+        J_array[i_frame] = J_total
+
+    np.save("J_array", J_array)

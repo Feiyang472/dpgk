@@ -1,0 +1,16 @@
+{
+    "NVT_params":{
+        "NVE_samples": 9,
+        "xv_stride": 2000,
+        "check_stride": 500,
+        "seed": 3924,
+        "n_beads": 32,
+        "temperature": 78,
+        "time_step": 0.5
+    },
+    "NVE_params":{
+        "md_steps": 50000,
+        "time_step": 0.2,
+        "check_stride": 500
+    }
+}
