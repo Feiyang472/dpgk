@@ -1,7 +1,7 @@
 import os, shutil
 from pathlib import Path
 
-from fryflow.workflow.conductance_ipi import NVE_in_ipi_template, bead_init_line
+from dpgk.workflow.conductance_local_tasks import NVE_in_ipi_template, bead_init_line
 
 def make_task_from_NVT(NVE_INFO, NVE_params):
     
@@ -29,7 +29,7 @@ def make_task_from_NVT(NVE_INFO, NVE_params):
         cell_dims = cell_info[2:5]
     else:
         raise RuntimeWarning('Cell information not found on second line.')
-    n_samples = len(poslines) // (N_atoms+2)
+    n_samples = len(poslines) // (N_atoms+2) - 1
     
     assert n_samples == NVE_INFO['n_samples'], f"{n_samples}, {NVE_INFO['n_samples']}"
     
@@ -57,9 +57,11 @@ def make_task_from_NVT(NVE_INFO, NVE_params):
 
         for i_sample in range(n_samples):
             with open(os.path.join(NVE_abspath, f"sample_{i_sample:02}/pos_bead_{i_bead:02}.xyz"), "x") as posframe:
-                posframe.writelines(poslines[i_sample*(N_atoms+2): (i_sample+1)*(N_atoms+2)])
+                posframe.writelines(poslines[(i_sample+1)*(N_atoms+2): (i_sample+2)*(N_atoms+2)])
             
             with open(os.path.join(NVE_abspath, f"sample_{i_sample:02}/vel_bead_{i_bead:02}.xyz"), "x") as velframe:
-                velframe.writelines(vellines[i_sample*(N_atoms+2): (i_sample+1)*(N_atoms+2)])
-        
+                velframe.writelines(vellines[(i_sample+1)*(N_atoms+2): (i_sample+2)*(N_atoms+2)])
+    
+
+    NVE_INFO['N_atoms'] = N_atoms
     return NVE_addr

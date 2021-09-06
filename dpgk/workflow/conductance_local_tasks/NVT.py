@@ -1,6 +1,6 @@
 import os, shutil
 
-from fryflow.workflow.conductance_ipi import NVT_in_ipi_template
+from dpgk.workflow.conductance_local_tasks import NVT_in_ipi_template
 
 def make_task(work_base_abspath, NVT_params, inputs):
     """
@@ -22,7 +22,7 @@ def make_task(work_base_abspath, NVT_params, inputs):
     NVT_dir = os.path.join(work_base_abspath, NVT_addr)
     os.mkdir(NVT_dir)
 
-    NVT_params['md_steps'] = (NVT_params['NVE_samples'] - 1) * NVT_params['xv_stride']
+    NVT_params['md_steps'] = (NVT_params['NVE_samples']) * NVT_params['xv_stride']
     del NVT_params['NVE_samples']
     with open(os.path.join(NVT_dir, 'input.xml'),  "x") as in_ipi:
         in_ipi.write(

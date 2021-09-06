@@ -10,6 +10,7 @@
     },
     "NVE_params":{
         "md_steps": 50000,
+        "xv_stride": 5,
         "time_step": 0.2,
         "check_stride": 500
     }

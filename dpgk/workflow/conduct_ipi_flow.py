@@ -2,10 +2,9 @@ import os, json
 
 from airflow.decorators import dag, task
 from airflow.operators.python import get_current_context
-from airflow.sensors.filesystem import FileSensor
 from dpdispatcher import Submission, Task, Resources, Machine
 
-from fryflow.workflow.conductance_ipi import NVT, NVE, calc_kappa
+from dpgk.workflow.conductance_local_tasks import NVT, NVE, KAPPA
 
 ENVIRONMENT = "/home/ubuntu/anaconda3/envs/thermo/deepmd-kit-2.0b3-gpu/bin/"
 
@@ -16,7 +15,6 @@ def get_kappa_params(params_path):
 def get_empty_submission(job_work_dir):
     context = get_current_context()['params']
     machine = Machine.load_from_dict(context['machine'])
-    
     resources = Resources.load_from_dict(context['resources'])
     submission = Submission(
         work_base=job_work_dir, 
@@ -26,10 +24,9 @@ def get_empty_submission(job_work_dir):
     return submission
 
 @task()
-def NVT_start():
-    context = get_current_context()['params']
-    work_base_abspath = context['work_base_abspath']
-    inputs = context['inputs']
+def NVT_start(START_INFO):
+    work_base_abspath = START_INFO['work_base_abspath']
+    inputs = START_INFO['inputs']
 
     NVT_params = get_kappa_params(os.path.join(work_base_abspath, 'kappa.json'))['NVT_params']
     NVT_addr = NVT.make_task(work_base_abspath, NVT_params, inputs)
@@ -53,21 +50,17 @@ def NVT_sampling(NVT_INFO):
     ipi_md_task = Task(
         command = (
             f"{ENVIRONMENT}i-pi input.xml >& logfile & sleep 5; "
-            "iclient=1; "
-            f"while [ $iclient -le {N_clients} ]; "
-            "do "
-            f"{ENVIRONMENT}client_dp 1234 {NVT_addr} unix {NVT_INFO['dp_graph']} {NVT_INFO['initial_state']} & "
+            f"iclient=1; while [ $iclient -le {N_clients} ]; "
+            f"do {ENVIRONMENT}client_dp 1234 {NVT_addr} unix {NVT_INFO['dp_graph']} {NVT_INFO['initial_state']} & "
             "iclient=$((iclient+1)); "
             "done; "
-            "wait; echo '***** finish time *****'; date; sleep 1; "
+            "wait; echo '********* finish time *********'; date; sleep 1; "
             ), 
         task_work_path = NVT_addr,
         forward_files = [NVT_INFO['dp_graph'], 
                          NVT_INFO['initial_state'], 
                          'input.xml'],
         backward_files = ['simulation.out',
-                          'err',
-                          'log',
                           'simulation.pos_*.xyz', 
                           'simulation.vel_*.xyz'])
     
@@ -75,7 +68,7 @@ def NVT_sampling(NVT_INFO):
     
     submission = get_empty_submission(work_base_abspath)
     submission.register_task(ipi_md_task)
-    submission.run_submission(clean=False)
+    submission.run_submission(clean=True)
 
     NVT_params = NVT_INFO['NVT_params']
     NVE_INFO = dict(
@@ -83,7 +76,7 @@ def NVT_sampling(NVT_INFO):
         dp_graph = NVT_INFO['dp_graph'],
         NVT_abspath = os.path.join(work_base_abspath, NVT_addr),
         n_beads = NVT_params['n_beads'],
-        n_samples = NVT_params['md_steps'] // NVT_params['xv_stride'] + 1,
+        n_samples = NVT_params['md_steps'] // NVT_params['xv_stride'],
         temperature = NVT_params['temperature']
     )
 
@@ -112,33 +105,35 @@ def NVE_runs(NVE_INFO):
     ipi_md_task_list = [Task(
         command = (
             f"{ENVIRONMENT}i-pi input.xml >& logfile & sleep 5; "
-            "iclient=1; "
-            f"while [ $iclient -le {N_clients} ]; "
-            "do "
-            f"{ENVIRONMENT}client_dp 1234 sample_{i_sample:02} unix ../{NVE_INFO['dp_graph']} pos_bead_00.xyz & "
+            f"iclient=1; while [ $iclient -le {N_clients} ]; "
+            f"do {ENVIRONMENT}client_dp 1234 sample_{i_sample:02} unix ../{NVE_INFO['dp_graph']} pos_bead_00.xyz & "
             "iclient=$((iclient+1)); "
             "done; "
-            "wait; echo '***** finish time *****'; date; sleep 1; "
-            f"{ENVIRONMENT}calc_J ../{NVE_INFO['dp_graph']} ; "
+            "wait; echo '********* finish time *********'; date; sleep 1; "
+            f"{ENVIRONMENT}calc_J ../{NVE_INFO['dp_graph']} ;"
             ), 
         task_work_path = f'sample_{i_sample:02}',
         forward_files = ['*.xyz', 'input.xml'],
         backward_files = ['simulation.out',
-                          'J_array.npy'])
+                          'J_array.npy',
+                          'x_array.npy',
+                          'v_array.npy',
+                          'a_array.npy'])
                         for i_sample in range(NVE_INFO['n_samples'])]
     
     submission = get_empty_submission(os.path.join(work_base_abspath, NVE_addr))
     submission.register_task_list(ipi_md_task_list)
     submission.forward_common_files = [NVE_INFO['dp_graph']]
-    submission.run_submission(clean=False)
+    submission.run_submission(clean=True)
     return NVE_INFO
 
 @task()
 def kappa_post_process(NVE_INFO):
-    calc_kappa.make_task(NVE_INFO)
+    KAPPA.make_task(NVE_INFO)
     work_base_abspath = NVE_INFO['work_base_abspath']
 
-    time_step = get_kappa_params(os.path.join(work_base_abspath, 'kappa.json'))['NVE_params']['time_step']*5
+    NVE_params = get_kappa_params(os.path.join(work_base_abspath, 'kappa.json'))['NVE_params']
+    time_step = NVE_params['time_step']*NVE_params['xv_stride']
     work_base_abspath = NVE_INFO['work_base_abspath']
     cell_dims = list(map(float, NVE_INFO['cell_dims']))
     cell_vol = cell_dims[0] * cell_dims[1] * cell_dims[2]
@@ -146,7 +141,7 @@ def kappa_post_process(NVE_INFO):
     temperature = NVE_INFO['temperature']
     kappa_task = Task(
         command = (
-            f"{ENVIRONMENT}thermocepstrum-analysis flux_data.npy --input-format dict -V {cell_vol} -T {temperature} -t {time_step} -k zflux -u real -r --FSTAR 0.5 -w 0.5 -o kappa_{temperature}K"
+            f"{ENVIRONMENT}thermocepstrum-analysis flux_data.npy --input-format dict -V {cell_vol} -T {temperature} -t {time_step} -k zflux -u real -r --FSTAR 1.2 -w 0.5 -o kappa_{temperature}K"
             ), 
         task_work_path = f'kappa_{temperature}K',
         forward_files = ['flux_data.npy'],
@@ -155,24 +150,29 @@ def kappa_post_process(NVE_INFO):
     
     submission = get_empty_submission(work_base_abspath)
     submission.register_task(kappa_task)
-    submission.run_submission(clean=False)
-    
-    
+    submission.run_submission(clean=True)
     return 0
 
 default_args = {
-    'owner': 'team23',
+    'owner': 'DeepPotentialUser',
     'start_date': '2021-07-01'
 }
 
+@task()
+def start_check():
+    context = get_current_context()['params']
+    START_INFO = dict(
+        work_base_abspath=context['work_base_abspath'],
+        inputs=context['inputs']
+    )
+    return START_INFO
+
 @dag(default_args=default_args, schedule_interval = None)
 def conductance_ipi_workflow():
-    # kappa_params = FileSensor(
-    #     task_id = 'wait_for_kappa_params',
-    #     mode = 'reschedule',
-    #     filepath = f"{get_current_context()['params']['work_base_abspath']}/kappa.json"
-    # )
-    NVT_INFO = NVT_start()
+
+    START_INFO = start_check()
+    
+    NVT_INFO = NVT_start(START_INFO)
     NVE_INFO = NVT_sampling(NVT_INFO)
 
     return kappa_post_process(NVE_runs(NVE_start(NVE_INFO)))

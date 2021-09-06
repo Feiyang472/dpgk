@@ -1,5 +1,5 @@
 import os
-from fryflow.workflow.conductance_ipi import NVE
+from dpgk.workflow.conductance_local_tasks import NVE
 import numpy as np
 
 def make_task(NVE_INFO):
