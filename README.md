@@ -1,7 +1,7 @@
 # DPGK (Deep potential Green-Kubo transport property workflows)
 
 ## Requirements
-DPGK performs simple, short calculations locally (or on the login node), and puts molecular dynamics simulations on the remote machine (or the compute node) via `dpdispatcher`. 
+DPGK performs simple, short calculations locally (or on the login node), and puts molecular dynamics simulations on the remote machine (or the compute node) via `dpdispatcher`. Currently, `i-pi` is required for doing RPMD in the remote environment, and `lammps` is required for `rdf`. In the future we might migrate to `lammps` completely. In addition, `thermocepstrum` is required for post-analysis.
 
 ## Installation
 Clone this repository and do
